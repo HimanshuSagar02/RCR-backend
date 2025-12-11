@@ -95,14 +95,33 @@ export const login=async(req,res)=>{
             return res.status(403).json({message:"Account rejected by admin"})
         }
         
-        // Check if user has a password (for Google sign-in users)
-        if(!user.password){
-            console.log(`[Login] User has no password (likely Google sign-in user): ${email}`);
-            return res.status(400).json({message:"This account was created with Google sign-in. Please use Google sign-in to login."})
+        // Check if user has a password
+        if(!user.password || user.password.trim() === ''){
+            console.log(`[Login] User has no password set: ${email}`);
+            console.log(`[Login] User password field:`, user.password ? "exists but empty" : "null/undefined");
+            return res.status(400).json({
+                message:"This account does not have a password set. Please use 'Forgot Password' to set a password, or contact admin.",
+                needsPasswordReset: true
+            })
         }
         
         // Verify password
-        let isMatch = await bcrypt.compare(password, user.password)
+        console.log(`[Login] Comparing password for: ${email}`);
+        console.log(`[Login] Password hash length: ${user.password.length}`);
+        console.log(`[Login] Password hash preview: ${user.password.substring(0, 20)}...`);
+        
+        let isMatch = false;
+        try {
+            isMatch = await bcrypt.compare(password, user.password);
+            console.log(`[Login] Password comparison result: ${isMatch}`);
+        } catch (compareError) {
+            console.error(`[Login] Password comparison error:`, compareError);
+            return res.status(500).json({
+                message:"Error verifying password. Please try again.",
+                error: process.env.NODE_ENV === 'development' ? compareError.message : undefined
+            })
+        }
+        
         if(!isMatch){
             console.log(`[Login] Incorrect password for: ${email}`);
             return res.status(400).json({message:"Incorrect password"})
@@ -295,16 +314,25 @@ export const resetPassword = async (req,res) => {
         if(!email || !password){
             return res.status(400).json({message:"Email and password are required"})
         }
-        if(password.length < 8){
-            return res.status(400).json({message:"Password must be at least 8 characters"})
+        if(password.length < 6){
+            return res.status(400).json({message:"Password must be at least 6 characters"})
         }
-         const user = await User.findOne({email})
+        
+        const normalizedEmail = email.toLowerCase().trim();
+        const user = await User.findOne({email: normalizedEmail})
+        
         if(!user){
             return res.status(404).json({message:"User not found"})
         }
-        if(!user.isOtpVerifed ){
+        
+        // Allow password reset if OTP verified OR if user has no password (first time setup)
+        const hasNoPassword = !user.password || user.password.trim() === '';
+        
+        if(!hasNoPassword && !user.isOtpVerifed){
             return res.status(400).json({message:"OTP verification required. Please verify OTP first."})
         }
+
+        console.log(`[ResetPassword] Setting password for: ${normalizedEmail}, HasNoPassword: ${hasNoPassword}, OTPVerified: ${user.isOtpVerifed}`);
 
         const hashPassword = await bcrypt.hash(password,10)
         user.password = hashPassword
@@ -312,9 +340,11 @@ export const resetPassword = async (req,res) => {
         user.resetOtp=undefined
         user.otpExpires=undefined
         await user.save()
+        
+        console.log(`[ResetPassword] Password reset successfully for: ${normalizedEmail}`);
         return res.status(200).json({message:"Password Reset Successfully"})
     } catch (error) {
-        console.error("Reset password error:", error);
+        console.error("[ResetPassword] Reset password error:", error);
         return res.status(500).json({message:`Reset Password error: ${error.message}`})
     }
 }
