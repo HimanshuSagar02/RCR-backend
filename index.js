@@ -36,9 +36,35 @@ const port = process.env.PORT || 8000   // fallback if env missing
 // Middlewares
 app.use(express.json())
 app.use(cookieParser())
+// CORS configuration - allow both production and development origins
+const allowedOrigins = [
+    "https://rajchemreactor.netlify.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+    process.env.FRONTEND_URL
+].filter(Boolean); // Remove undefined values
+
 app.use(cors({
-    origin:["https://rajchemreactor.netlify.app"], 
-    credentials: true
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        
+        // In development, allow all origins
+        if (process.env.NODE_ENV !== 'production') {
+            return callback(null, true);
+        }
+        
+        // In production, check against allowed origins
+        if (allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        } else {
+            console.warn(`CORS blocked origin: ${origin}`);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
 }))
 
 // API Routes 🔽
