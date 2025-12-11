@@ -132,23 +132,36 @@ export const login=async(req,res)=>{
         await user.save();
         
         // Generate token
-        let token = await genToken(user._id)
+        let token;
+        try {
+            token = await genToken(user._id);
+            console.log(`[Login] Token generated successfully for: ${email}`);
+        } catch (tokenError) {
+            console.error(`[Login] Token generation failed:`, tokenError);
+            return res.status(500).json({
+                message: "Failed to generate authentication token",
+                error: process.env.NODE_ENV === 'development' ? tokenError.message : undefined
+            });
+        }
         
         // Cookie settings - use secure in production
         const isProduction = process.env.NODE_ENV === 'production';
-        res.cookie("token",token,{
-            httpOnly:true,
+        const cookieOptions = {
+            httpOnly: true,
             secure: isProduction, // Use secure cookies in production (HTTPS only)
             sameSite: isProduction ? "None" : "Lax", // None for cross-site in production, Lax for development
             maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-            domain: isProduction ? undefined : undefined // Let browser set domain automatically
-        })
+        };
+        
+        // Set cookie
+        res.cookie("token", token, cookieOptions);
+        console.log(`[Login] Cookie set - secure: ${cookieOptions.secure}, sameSite: ${cookieOptions.sameSite}`);
         
         // Return user without password
         const userResponse = user.toObject();
         delete userResponse.password;
         
-        console.log(`[Login] Login successful for: ${email}, Role: ${user.role}`);
+        console.log(`[Login] Login successful for: ${email}, Role: ${user.role}, UserID: ${user._id}`);
         return res.status(200).json(userResponse)
 
     } catch (error) {

@@ -2,6 +2,7 @@ import express from "express";
 import User from "../models/userModel.js";
 import connectDb from "../configs/db.js";
 import mongoose from "mongoose";
+import bcrypt from "bcryptjs";
 
 const router = express.Router();
 
@@ -93,6 +94,86 @@ router.get("/user/:email", async (req, res) => {
     }
 });
 
+// Test login endpoint (simulates login without setting cookies)
+router.post("/login-test", async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        
+        if (!email || !password) {
+            return res.status(400).json({
+                success: false,
+                message: "Email and password are required"
+            });
+        }
+        
+        const normalizedEmail = email.toLowerCase().trim();
+        const user = await User.findOne({ email: normalizedEmail });
+        
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found",
+                email: normalizedEmail
+            });
+        }
+        
+        // Check status
+        if (user.status === "pending") {
+            return res.status(403).json({
+                success: false,
+                message: "Account pending approval",
+                status: user.status
+            });
+        }
+        
+        if (user.status === "rejected") {
+            return res.status(403).json({
+                success: false,
+                message: "Account rejected",
+                status: user.status
+            });
+        }
+        
+        // Check password
+        if (!user.password || user.password.trim() === '') {
+            return res.status(400).json({
+                success: false,
+                message: "User has no password set",
+                needsPasswordReset: true
+            });
+        }
+        
+        // Compare password
+        const isMatch = await bcrypt.compare(password, user.password);
+        
+        if (!isMatch) {
+            return res.status(400).json({
+                success: false,
+                message: "Incorrect password"
+            });
+        }
+        
+        // Success
+        return res.status(200).json({
+            success: true,
+            message: "Login would succeed",
+            user: {
+                _id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                status: user.status
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Login test failed",
+            error: error.message
+        });
+    }
+});
+
 // Set password for user (for users without passwords)
 router.post("/user/:email/set-password", async (req, res) => {
     try {
@@ -117,8 +198,7 @@ router.post("/user/:email/set-password", async (req, res) => {
         }
         
         // Hash and set password
-        const bcrypt = await import("bcryptjs");
-        const hashedPassword = await bcrypt.default.hash(password, 10);
+        const hashedPassword = await bcrypt.hash(password, 10);
         user.password = hashedPassword;
         await user.save();
         
