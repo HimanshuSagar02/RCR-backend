@@ -40,13 +40,20 @@ export const signUp=async (req,res)=>{
             createdByAdmin:false
             })
         let token = await genToken(user._id)
+        
+        // Cookie settings - use secure in production
+        const isProduction = process.env.NODE_ENV === 'production';
         res.cookie("token",token,{
             httpOnly:true,
-            secure:false,
-            sameSite: "Strict",
-            maxAge: 7 * 24 * 60 * 60 * 1000
+            secure: isProduction, // Use secure cookies in production (HTTPS only)
+            sameSite: isProduction ? "None" : "Lax", // None for cross-site in production, Lax for development
+            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
         })
-        return res.status(201).json(user)
+        
+        // Return user without password
+        const userResponse = user.toObject();
+        delete userResponse.password;
+        return res.status(201).json(userResponse)
 
     } catch (error) {
         console.log("signUp error")
@@ -57,34 +64,86 @@ export const signUp=async (req,res)=>{
 export const login=async(req,res)=>{
     try {
         let {email,password}= req.body
-        let user= await User.findOne({email})
-        if(!user){
-            return res.status(400).json({message:"user does not exist"})
+        
+        // Validate input
+        if(!email || !password){
+            return res.status(400).json({message:"Email and password are required"})
         }
+        
+        // Normalize email (lowercase, trim)
+        email = email.toLowerCase().trim()
+        
+        console.log(`[Login] Attempting login for email: ${email}`);
+        
+        // Find user by email (case-insensitive search)
+        let user= await User.findOne({email: email.toLowerCase()})
+        
+        if(!user){
+            console.log(`[Login] User not found: ${email}`);
+            return res.status(400).json({message:"User does not exist"})
+        }
+        
+        console.log(`[Login] User found - ID: ${user._id}, Status: ${user.status}, Role: ${user.role}`);
+        
+        // Check account status
         if(user.status === "pending"){
+            console.log(`[Login] Account pending approval: ${email}`);
             return res.status(403).json({message:"Account pending approval by admin"})
         }
         if(user.status === "rejected"){
+            console.log(`[Login] Account rejected: ${email}`);
             return res.status(403).json({message:"Account rejected by admin"})
         }
-        let isMatch =await bcrypt.compare(password, user.password)
-        if(!isMatch){
-            return res.status(400).json({message:"incorrect Password"})
+        
+        // Check if user has a password (for Google sign-in users)
+        if(!user.password){
+            console.log(`[Login] User has no password (likely Google sign-in user): ${email}`);
+            return res.status(400).json({message:"This account was created with Google sign-in. Please use Google sign-in to login."})
         }
+        
+        // Verify password
+        let isMatch = await bcrypt.compare(password, user.password)
+        if(!isMatch){
+            console.log(`[Login] Incorrect password for: ${email}`);
+            return res.status(400).json({message:"Incorrect password"})
+        }
+        
+        // Update last login
         user.lastLoginAt = new Date();
         await user.save();
-        let token =await genToken(user._id)
+        
+        // Generate token
+        let token = await genToken(user._id)
+        
+        // Cookie settings - use secure in production
+        const isProduction = process.env.NODE_ENV === 'production';
         res.cookie("token",token,{
             httpOnly:true,
-            secure:false,
-            sameSite: "Strict",
-            maxAge: 7 * 24 * 60 * 60 * 1000
+            secure: isProduction, // Use secure cookies in production (HTTPS only)
+            sameSite: isProduction ? "None" : "Lax", // None for cross-site in production, Lax for development
+            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+            domain: isProduction ? undefined : undefined // Let browser set domain automatically
         })
-        return res.status(200).json(user)
+        
+        // Return user without password
+        const userResponse = user.toObject();
+        delete userResponse.password;
+        
+        console.log(`[Login] Login successful for: ${email}, Role: ${user.role}`);
+        return res.status(200).json(userResponse)
 
     } catch (error) {
-        console.log("login error")
-        return res.status(500).json({message:`login Error ${error}`})
+        console.error("[Login] Login error:", error);
+        console.error("[Login] Error stack:", error.stack);
+        console.error("[Login] Error details:", {
+            message: error.message,
+            name: error.name,
+            email: req.body?.email
+        });
+        return res.status(500).json({
+            message: `Login error: ${error.message || 'Internal server error'}`,
+            error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        })
     }
 }
 
