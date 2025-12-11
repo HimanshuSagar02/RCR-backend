@@ -37,8 +37,8 @@ const port = process.env.PORT || 8000   // fallback if env missing
 app.use(express.json())
 app.use(cookieParser())
 app.use(cors({
-    origin:["http://localhost:5173"], 
-    credentials:true
+    origin:["https://rajchemreactor.netlify.app"], 
+    credentials: true
 }))
 
 // API Routes 🔽
