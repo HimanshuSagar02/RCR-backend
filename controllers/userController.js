@@ -1,0 +1,270 @@
+import uploadOnCloudinary from "../configs/cloudinary.js";
+import User from "../models/userModel.js";
+import Course from "../models/courseModel.js";
+import Grade from "../models/gradeModel.js";
+import Attendance from "../models/attendanceModel.js";
+
+/* ========================= Get Current User ========================= */
+export const getCurrentUser = async (req, res) => {
+  try {
+    const user = await User.findById(req.userId)
+      .select("-password");
+
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    // For students, populate enrolled courses
+    // For educators/admins, don't populate enrolled courses (they don't enroll)
+    if (user.role === "student") {
+      await user.populate("enrolledCourses");
+    }
+
+    return res.status(200).json(user);
+  } catch (error) {
+    return res.status(500).json({ message: "Get current user error", error });
+  }
+};
+
+
+/* ========================= Update Profile ========================= */
+export const UpdateProfile = async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    let photoUrl;
+
+    if (req.file) {
+      photoUrl = await uploadOnCloudinary(req.file.path);
+    }
+
+    const updatedUser = await User.findByIdAndUpdate(
+      req.userId,
+      { name, description, ...(photoUrl && { photoUrl }) },
+      { new: true }
+    );
+
+    if (!updatedUser) return res.status(404).json({ message: "User not found" });
+
+    return res.status(200).json(updatedUser);
+
+  } catch (error) {
+    return res.status(500).json({ message: `Update profile error ${error}` });
+  }
+};
+
+
+/* ========================= Get Enrolled Courses ========================= */
+export const getEnrolledCourses = async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    // For educators and admins, return courses they created (not enrolled)
+    if (user.role === "educator" || user.role === "admin") {
+      const createdCourses = await Course.find({ creator: req.userId })
+        .populate("creator", "name email")
+        .populate("enrolledStudents", "name email");
+      return res.status(200).json(createdCourses);
+    }
+
+    // For students, return enrolled courses
+    const populatedUser = await User.findById(req.userId)
+      .populate("enrolledCourses");
+    
+    return res.status(200).json(populatedUser.enrolledCourses || []);
+
+  } catch (err) {
+    return res.status(500).json({ message: "Error fetching enrolled courses", err });
+  }
+};
+
+/* ========================= Educator: My Students ========================= */
+export const getMyStudents = async (req, res) => {
+  try {
+    const me = await User.findById(req.userId);
+    if (!me || (me.role !== "educator" && me.role !== "admin")) {
+      return res.status(403).json({ message: "Educator or admin access required" });
+    }
+    
+    // For admins, get all students. For educators, get only their students
+    let courses;
+    if (me.role === "admin") {
+      courses = await Course.find().populate("enrolledStudents");
+    } else {
+      courses = await Course.find({ creator: req.userId }).populate("enrolledStudents");
+    }
+    
+    const studentsMap = new Map();
+    courses.forEach((course) => {
+      (course.enrolledStudents || []).forEach((s) => {
+        studentsMap.set(s._id.toString(), s);
+      });
+    });
+    return res.status(200).json(Array.from(studentsMap.values()));
+  } catch (error) {
+    return res.status(500).json({ message: "Error fetching students", error });
+  }
+};
+
+/* ========================= Get Student Performance ========================= */
+export const getStudentPerformance = async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const educator = await User.findById(req.userId);
+    
+    if (!educator || (educator.role !== "educator" && educator.role !== "admin")) {
+      return res.status(403).json({ message: "Educator access required" });
+    }
+
+    const student = await User.findById(studentId);
+    if (!student) return res.status(404).json({ message: "Student not found" });
+
+    // Get all courses where educator is creator and student is enrolled
+    const educatorCourses = await Course.find({ creator: req.userId });
+    const courseIds = educatorCourses.map(c => c._id);
+    const enrolledCourseIds = educatorCourses
+      .filter(c => c.enrolledStudents && Array.isArray(c.enrolledStudents) && c.enrolledStudents.some(id => id.toString() === studentId))
+      .map(c => c._id);
+
+    // Get all grades for this student in educator's courses
+    const grades = await Grade.find({
+      studentId,
+      courseId: { $in: enrolledCourseIds }
+    })
+      .populate("courseId", "title")
+      .sort({ date: -1 });
+
+    // Calculate grade statistics
+    const gradeStats = {
+      totalGrades: grades.length,
+      averagePercentage: 0,
+      gradeDistribution: {
+        "A+": 0, "A": 0, "B+": 0, "B": 0, "C+": 0, "C": 0, "D": 0, "F": 0
+      },
+      byCourse: {}
+    };
+
+    if (grades.length > 0) {
+      const totalPercentage = grades.reduce((sum, g) => sum + g.percentage, 0);
+      gradeStats.averagePercentage = Math.round(totalPercentage / grades.length);
+
+      grades.forEach(grade => {
+        gradeStats.gradeDistribution[grade.grade] = (gradeStats.gradeDistribution[grade.grade] || 0) + 1;
+        
+        const courseId = grade.courseId._id.toString();
+        if (!gradeStats.byCourse[courseId]) {
+          gradeStats.byCourse[courseId] = {
+            courseTitle: grade.courseId.title,
+            grades: [],
+            averagePercentage: 0
+          };
+        }
+        gradeStats.byCourse[courseId].grades.push(grade);
+      });
+
+      // Calculate average for each course
+      Object.keys(gradeStats.byCourse).forEach(courseId => {
+        const courseGrades = gradeStats.byCourse[courseId].grades;
+        const avg = courseGrades.reduce((sum, g) => sum + g.percentage, 0) / courseGrades.length;
+        gradeStats.byCourse[courseId].averagePercentage = Math.round(avg);
+      });
+    }
+
+    // Get attendance records
+    const attendanceRecords = await Attendance.find({
+      courseId: { $in: enrolledCourseIds },
+      "records.studentId": studentId
+    })
+      .populate("courseId", "title")
+      .sort({ date: -1 });
+
+    // Calculate attendance statistics
+    const attendanceStats = {
+      totalRecords: attendanceRecords.length,
+      present: 0,
+      absent: 0,
+      late: 0,
+      attendancePercentage: 0,
+      byCourse: {}
+    };
+
+    attendanceRecords.forEach(record => {
+      const studentRecord = record.records.find(r => r.studentId.toString() === studentId);
+      if (studentRecord) {
+        if (studentRecord.status === "present") attendanceStats.present++;
+        else if (studentRecord.status === "absent") attendanceStats.absent++;
+        else if (studentRecord.status === "late") attendanceStats.late++;
+
+        const courseId = record.courseId._id.toString();
+        if (!attendanceStats.byCourse[courseId]) {
+          attendanceStats.byCourse[courseId] = {
+            courseTitle: record.courseId.title,
+            present: 0,
+            absent: 0,
+            late: 0,
+            total: 0
+          };
+        }
+        attendanceStats.byCourse[courseId].total++;
+        if (studentRecord.status === "present") attendanceStats.byCourse[courseId].present++;
+        else if (studentRecord.status === "absent") attendanceStats.byCourse[courseId].absent++;
+        else if (studentRecord.status === "late") attendanceStats.byCourse[courseId].late++;
+      }
+    });
+
+    if (attendanceStats.totalRecords > 0) {
+      attendanceStats.attendancePercentage = Math.round(
+        ((attendanceStats.present + attendanceStats.late) / attendanceStats.totalRecords) * 100
+      );
+    }
+
+    // Get enrolled courses
+    const enrolledCourses = educatorCourses.filter(c => 
+      c.enrolledStudents && Array.isArray(c.enrolledStudents) && c.enrolledStudents.some(id => id.toString() === studentId)
+    ).map(c => ({
+      _id: c._id,
+      title: c.title,
+      category: c.category,
+      thumbnail: c.thumbnail
+    }));
+
+    return res.status(200).json({
+      student: {
+        _id: student._id,
+        name: student.name,
+        email: student.email,
+        photoUrl: student.photoUrl,
+        totalActiveMinutes: student.totalActiveMinutes || 0,
+        lastActiveAt: student.lastActiveAt,
+        lastLoginAt: student.lastLoginAt
+      },
+      enrolledCourses,
+      grades: grades,
+      gradeStats,
+      attendance: attendanceRecords,
+      attendanceStats,
+      activity: {
+        totalActiveMinutes: student.totalActiveMinutes || 0,
+        lastActiveAt: student.lastActiveAt,
+        lastLoginAt: student.lastLoginAt
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({ message: `Get student performance failed: ${error.message}` });
+  }
+};
+
+/* ========================= Activity Tracking ========================= */
+export const updateActivity = async (req, res) => {
+  try {
+    const { minutes } = req.body;
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    const addMinutes = Number(minutes) || 0;
+    user.totalActiveMinutes = (user.totalActiveMinutes || 0) + addMinutes;
+    user.lastActiveAt = new Date();
+    await user.save();
+    return res.status(200).json({ totalActiveMinutes: user.totalActiveMinutes, lastActiveAt: user.lastActiveAt });
+  } catch (error) {
+    return res.status(500).json({ message: "Activity update failed", error });
+  }
+};
