@@ -39,7 +39,7 @@ app.use(cookieParser())
 // CORS configuration - allow both production and development origins
 const allowedOrigins = [
     "https://rajchemreactor.netlify.app",
-    "http://localhost:5173",
+    "http://localhost:5174",
     "http://localhost:3000",
     process.env.FRONTEND_URL
 ].filter(Boolean); // Remove undefined values

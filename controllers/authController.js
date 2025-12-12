@@ -3,6 +3,7 @@ import validator from "validator"
 
 import bcrypt from "bcryptjs"
 import User from "../models/userModel.js"
+import mongoose from "mongoose"
 
 import sendMail from "../configs/Mail.js"
 
@@ -74,16 +75,50 @@ export const login=async(req,res)=>{
         email = email.toLowerCase().trim()
         
         console.log(`[Login] Attempting login for email: ${email}`);
+        console.log(`[Login] Database connection state: ${mongoose.connection.readyState} (1=connected)`);
         
-        // Find user by email (case-insensitive search)
-        let user= await User.findOne({email: email.toLowerCase()})
+        // Try multiple query methods to find user (case-insensitive)
+        // IMPORTANT: Don't use .lean() because we need to save the user later
+        let user = null;
+        
+        // Method 1: Exact match (lowercase)
+        user = await User.findOne({email: email});
+        console.log(`[Login] Query method 1 (exact lowercase): ${user ? 'Found' : 'Not found'}`);
+        
+        // Method 2: Case-insensitive regex if first method fails
+        if (!user) {
+            user = await User.findOne({email: { $regex: new RegExp(`^${email}$`, 'i') }});
+            console.log(`[Login] Query method 2 (case-insensitive regex): ${user ? 'Found' : 'Not found'}`);
+        }
+        
+        // Method 3: Try with any case variations
+        if (!user) {
+            // Get all users and check manually (fallback)
+            const allUsers = await User.find({}).select('email').lean();
+            console.log(`[Login] Total users in database: ${allUsers.length}`);
+            const matchingUser = allUsers.find(u => u.email && u.email.toLowerCase() === email);
+            if (matchingUser) {
+                // Query again WITHOUT .lean() to get Mongoose document
+                user = await User.findOne({email: matchingUser.email});
+                console.log(`[Login] Query method 3 (manual match): Found user with email: ${matchingUser.email}`);
+            }
+        }
         
         if(!user){
-            console.log(`[Login] User not found: ${email}`);
+            console.log(`[Login] User not found after all query methods: ${email}`);
+            // Try to get sample emails for debugging
+            try {
+                const sampleUsers = await User.find({}).limit(3).select('email').lean();
+                console.log(`[Login] Sample emails in database:`, sampleUsers.map(u => u.email));
+            } catch (e) {
+                console.error(`[Login] Error getting sample users:`, e);
+            }
             return res.status(400).json({message:"User does not exist"})
         }
         
-        console.log(`[Login] User found - ID: ${user._id}, Status: ${user.status}, Role: ${user.role}`);
+        console.log(`[Login] User found - ID: ${user._id}, Email: ${user.email}, Status: ${user.status}, Role: ${user.role}`);
+        console.log(`[Login] User has password: ${!!(user.password && user.password.trim())}`);
+        console.log(`[Login] User is Mongoose document: ${user instanceof mongoose.Document}`);
         
         // Check account status
         if(user.status === "pending"){
@@ -127,9 +162,15 @@ export const login=async(req,res)=>{
             return res.status(400).json({message:"Incorrect password"})
         }
         
-        // Update last login
-        user.lastLoginAt = new Date();
-        await user.save();
+        // Update last login - user is a Mongoose document, so save() will work
+        try {
+            user.lastLoginAt = new Date();
+            await user.save();
+            console.log(`[Login] Last login time updated successfully`);
+        } catch (saveError) {
+            console.error(`[Login] Error saving last login time:`, saveError);
+            // Don't fail login if save fails, just log the error
+        }
         
         // Generate token
         let token;
