@@ -46,24 +46,37 @@ export const createNotification = async (req, res) => {
 // Get notifications for current user
 export const getMyNotifications = async (req, res) => {
   try {
+    console.log(`[GetMyNotifications] Fetching notifications for user: ${req.userId}`);
     const user = await User.findById(req.userId);
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) {
+      console.log(`[GetMyNotifications] User not found: ${req.userId}`);
+      return res.status(404).json({ message: "User not found" });
+    }
 
+    console.log(`[GetMyNotifications] User role: ${user.role}`);
     let filter = { isActive: true };
 
     // Filter by target audience
     if (user.role === "student") {
+      const enrolledCourses = user.enrolledCourses || [];
+      console.log(`[GetMyNotifications] Student enrolled in ${enrolledCourses.length} courses`);
       filter.$or = [
         { targetAudience: "all" },
         { targetAudience: "students" },
-        { targetAudience: "course", courseId: { $in: user.enrolledCourses || [] } },
+        { targetAudience: "course", courseId: { $in: enrolledCourses } },
       ];
     } else if (user.role === "educator") {
+      const myCourses = await Course.find({ creator: req.userId }).select("_id");
+      const courseIds = myCourses.map(c => c._id);
+      console.log(`[GetMyNotifications] Educator created ${courseIds.length} courses`);
       filter.$or = [
         { targetAudience: "all" },
         { targetAudience: "educators" },
-        { targetAudience: "course", courseId: { $in: await Course.find({ creator: req.userId }).select("_id") } },
+        { targetAudience: "course", courseId: { $in: courseIds } },
       ];
+    } else if (user.role === "admin") {
+      // Admin sees all active notifications
+      console.log(`[GetMyNotifications] Admin - fetching all notifications`);
     }
 
     const notifications = await Notification.find(filter)
@@ -71,15 +84,20 @@ export const getMyNotifications = async (req, res) => {
       .populate("courseId", "title")
       .sort({ createdAt: -1 });
 
+    console.log(`[GetMyNotifications] Found ${notifications.length} notifications`);
+
     // Mark read status
     const notificationsWithReadStatus = notifications.map((notif) => {
       const isRead = notif.isRead.some((r) => r.userId.toString() === req.userId.toString());
       return { ...notif.toObject(), isRead };
     });
 
-    return res.status(200).json(notificationsWithReadStatus);
+    return res.status(200).json(notificationsWithReadStatus || []);
   } catch (error) {
-    return res.status(500).json({ message: `Fetch notifications failed: ${error}` });
+    console.error("[GetMyNotifications] Error:", error);
+    return res.status(500).json({ 
+      message: `Fetch notifications failed: ${error.message || error}` 
+    });
   }
 };
 

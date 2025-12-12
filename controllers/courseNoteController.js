@@ -13,8 +13,12 @@ const canManageNote = (note, user) => {
 export const listCourseNotes = async (req, res) => {
   try {
     const { courseId } = req.query;
+    console.log(`[ListCourseNotes] Fetching notes for user: ${req.userId}, courseId: ${courseId || 'all'}`);
     const user = await User.findById(req.userId);
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) {
+      console.log(`[ListCourseNotes] User not found: ${req.userId}`);
+      return res.status(404).json({ message: "User not found" });
+    }
 
     let filter = courseId ? { courseId } : {};
 
@@ -24,19 +28,28 @@ export const listCourseNotes = async (req, res) => {
         enrolledStudents: req.userId,
       }).select("_id");
       const courseIds = enrolledCourses.map((c) => c._id);
+      console.log(`[ListCourseNotes] Student enrolled in ${courseIds.length} courses`);
       if (courseIds.length === 0) {
+        console.log(`[ListCourseNotes] No enrolled courses, returning empty array`);
         return res.status(200).json([]);
       }
       filter = { ...filter, courseId: { $in: courseIds } };
+    } else {
+      console.log(`[ListCourseNotes] User role: ${user.role} - can see all notes`);
     }
 
     const notes = await CourseNote.find(filter)
       .populate("uploaderId", "name email role")
       .populate("courseId", "title")
       .sort({ createdAt: -1 });
-    return res.status(200).json(notes);
+    
+    console.log(`[ListCourseNotes] Found ${notes.length} notes`);
+    return res.status(200).json(notes || []);
   } catch (error) {
-    return res.status(500).json({ message: `Fetch notes failed: ${error}` });
+    console.error("[ListCourseNotes] Error:", error);
+    return res.status(500).json({ 
+      message: `Fetch notes failed: ${error.message || error}` 
+    });
   }
 };
 

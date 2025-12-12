@@ -77,17 +77,35 @@ export const listCourseAttendance = async (req, res) => {
 export const listMyAttendance = async (req, res) => {
   try {
     const { courseId } = req.query;
+    console.log(`[ListMyAttendance] Fetching attendance for user: ${req.userId}, courseId: ${courseId || 'all'}`);
     const filter = { "records.studentId": req.userId };
     if (courseId) filter.courseId = courseId;
-    const records = await Attendance.find(filter).sort({ date: -1 });
+    
+    const records = await Attendance.find(filter)
+      .populate("courseId", "title")
+      .sort({ date: -1 });
+    
+    console.log(`[ListMyAttendance] Found ${records.length} attendance records`);
+    
     // flatten to student view
     const mine = records.map((rec) => {
       const r = rec.records.find((x) => x.studentId.toString() === req.userId.toString());
-      return { _id: rec._id, courseId: rec.courseId, date: rec.date, status: r?.status };
+      return { 
+        _id: rec._id, 
+        courseId: rec.courseId, 
+        courseTitle: rec.courseId?.title || "Unknown Course",
+        date: rec.date, 
+        status: r?.status || "absent" 
+      };
     });
-    return res.status(200).json(mine);
+    
+    console.log(`[ListMyAttendance] Returning ${mine.length} attendance records`);
+    return res.status(200).json(mine || []);
   } catch (error) {
-    return res.status(500).json({ message: `Fetch my attendance failed: ${error}` });
+    console.error("[ListMyAttendance] Error:", error);
+    return res.status(500).json({ 
+      message: `Fetch my attendance failed: ${error.message || error}` 
+    });
   }
 };
 

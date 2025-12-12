@@ -111,28 +111,40 @@ export const createLiveClass = async (req, res) => {
 export const getCourseLiveClasses = async (req, res) => {
   try {
     const { courseId } = req.params;
+    console.log(`[GetCourseLiveClasses] Fetching live classes for course: ${courseId}`);
     const liveClasses = await LiveClass.find({ courseId })
       .populate("educatorId", "name email photoUrl")
       .populate("enrolledStudents.studentId", "name email")
       .sort({ scheduledDate: -1 });
 
-    return res.status(200).json(liveClasses);
+    console.log(`[GetCourseLiveClasses] Found ${liveClasses.length} live classes`);
+    return res.status(200).json(liveClasses || []);
   } catch (error) {
-    return res.status(500).json({ message: `Fetch live classes failed: ${error.message}` });
+    console.error("[GetCourseLiveClasses] Error:", error);
+    return res.status(500).json({ 
+      message: `Fetch live classes failed: ${error.message || error}` 
+    });
   }
 };
 
 // Get all live classes for student (enrolled courses)
 export const getMyLiveClasses = async (req, res) => {
   try {
+    console.log(`[GetMyLiveClasses] Fetching live classes for user: ${req.userId}`);
     const user = await User.findById(req.userId).populate("enrolledCourses");
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) {
+      console.log(`[GetMyLiveClasses] User not found: ${req.userId}`);
+      return res.status(404).json({ message: "User not found" });
+    }
 
     const courseIds = (user.enrolledCourses || []).map((c) =>
       typeof c === "string" ? c : c._id
     );
 
+    console.log(`[GetMyLiveClasses] User enrolled in ${courseIds.length} courses`);
+
     if (courseIds.length === 0) {
+      console.log(`[GetMyLiveClasses] No enrolled courses, returning empty array`);
       return res.status(200).json([]);
     }
 
@@ -144,19 +156,28 @@ export const getMyLiveClasses = async (req, res) => {
       .populate("educatorId", "name email photoUrl")
       .sort({ scheduledDate: 1 });
 
-    return res.status(200).json(liveClasses);
+    console.log(`[GetMyLiveClasses] Found ${liveClasses.length} live classes`);
+    return res.status(200).json(liveClasses || []);
   } catch (error) {
-    return res.status(500).json({ message: `Fetch my live classes failed: ${error.message}` });
+    console.error("[GetMyLiveClasses] Error:", error);
+    return res.status(500).json({ 
+      message: `Fetch my live classes failed: ${error.message || error}` 
+    });
   }
 };
 
 // Get live classes created by educator
 export const getEducatorLiveClasses = async (req, res) => {
   try {
+    console.log(`[GetEducatorLiveClasses] Fetching live classes for educator: ${req.userId}`);
     const user = await User.findById(req.userId);
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) {
+      console.log(`[GetEducatorLiveClasses] User not found: ${req.userId}`);
+      return res.status(404).json({ message: "User not found" });
+    }
 
     if (user.role !== "educator" && user.role !== "admin") {
+      console.log(`[GetEducatorLiveClasses] Access denied for role: ${user.role}`);
       return res.status(403).json({ message: "Only educators can view their live classes" });
     }
 
@@ -165,9 +186,13 @@ export const getEducatorLiveClasses = async (req, res) => {
       .populate("enrolledStudents.studentId", "name email")
       .sort({ scheduledDate: -1 });
 
-    return res.status(200).json(liveClasses);
+    console.log(`[GetEducatorLiveClasses] Found ${liveClasses.length} live classes`);
+    return res.status(200).json(liveClasses || []);
   } catch (error) {
-    return res.status(500).json({ message: `Fetch educator live classes failed: ${error.message}` });
+    console.error("[GetEducatorLiveClasses] Error:", error);
+    return res.status(500).json({ 
+      message: `Fetch educator live classes failed: ${error.message || error}` 
+    });
   }
 };
 

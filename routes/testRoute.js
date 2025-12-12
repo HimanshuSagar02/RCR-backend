@@ -216,6 +216,98 @@ router.post("/user/:email/set-password", async (req, res) => {
     }
 });
 
+// Test notifications
+router.get("/notifications", async (req, res) => {
+    try {
+        const Notification = (await import("../models/notificationModel.js")).default;
+        const count = await Notification.countDocuments();
+        const notifications = await Notification.find().limit(5).select("title type isActive").lean();
+        
+        return res.status(200).json({
+            success: true,
+            totalNotifications: count,
+            sampleNotifications: notifications || [],
+            message: "Notifications query successful"
+        });
+    } catch (error) {
+        console.error("[Test] Notifications query error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Notifications query failed",
+            error: error.message
+        });
+    }
+});
+
+// Test shared notes
+router.get("/shared-notes", async (req, res) => {
+    try {
+        const CourseNote = (await import("../models/courseNoteModel.js")).default;
+        const count = await CourseNote.countDocuments();
+        const notes = await CourseNote.find().limit(5).select("title courseId").lean();
+        
+        return res.status(200).json({
+            success: true,
+            totalNotes: count,
+            sampleNotes: notes || [],
+            message: "Shared notes query successful"
+        });
+    } catch (error) {
+        console.error("[Test] Shared notes query error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Shared notes query failed",
+            error: error.message
+        });
+    }
+});
+
+// Test attendance
+router.get("/attendance", async (req, res) => {
+    try {
+        const Attendance = (await import("../models/attendanceModel.js")).default;
+        const count = await Attendance.countDocuments();
+        const attendance = await Attendance.find().limit(5).select("courseId date").lean();
+        
+        return res.status(200).json({
+            success: true,
+            totalRecords: count,
+            sampleRecords: attendance || [],
+            message: "Attendance query successful"
+        });
+    } catch (error) {
+        console.error("[Test] Attendance query error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Attendance query failed",
+            error: error.message
+        });
+    }
+});
+
+// Test live classes
+router.get("/live-classes", async (req, res) => {
+    try {
+        const LiveClass = (await import("../models/liveClassModel.js")).default;
+        const count = await LiveClass.countDocuments();
+        const liveClasses = await LiveClass.find().limit(5).select("title courseId status").lean();
+        
+        return res.status(200).json({
+            success: true,
+            totalLiveClasses: count,
+            sampleLiveClasses: liveClasses || [],
+            message: "Live classes query successful"
+        });
+    } catch (error) {
+        console.error("[Test] Live classes query error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Live classes query failed",
+            error: error.message
+        });
+    }
+});
+
 // Test data fetching endpoints
 router.get("/courses", async (req, res) => {
     try {
