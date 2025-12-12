@@ -103,28 +103,50 @@ export const getEnrolledCourses = async (req, res) => {
 /* ========================= Educator: My Students ========================= */
 export const getMyStudents = async (req, res) => {
   try {
+    console.log(`[GetMyStudents] Fetching students for user: ${req.userId}`);
     const me = await User.findById(req.userId);
-    if (!me || (me.role !== "educator" && me.role !== "admin")) {
+    if (!me) {
+      console.log(`[GetMyStudents] User not found: ${req.userId}`);
+      return res.status(404).json({ message: "User not found" });
+    }
+    
+    if (me.role !== "educator" && me.role !== "admin") {
+      console.log(`[GetMyStudents] Access denied for role: ${me.role}`);
       return res.status(403).json({ message: "Educator or admin access required" });
     }
     
     // For admins, get all students. For educators, get only their students
     let courses;
     if (me.role === "admin") {
-      courses = await Course.find().populate("enrolledStudents");
+      console.log(`[GetMyStudents] Admin - fetching all courses`);
+      courses = await Course.find().populate("enrolledStudents", "name email photoUrl class subject totalActiveMinutes lastActiveAt");
     } else {
-      courses = await Course.find({ creator: req.userId }).populate("enrolledStudents");
+      console.log(`[GetMyStudents] Educator - fetching courses created by: ${req.userId}`);
+      courses = await Course.find({ creator: req.userId }).populate("enrolledStudents", "name email photoUrl class subject totalActiveMinutes lastActiveAt");
     }
+    
+    console.log(`[GetMyStudents] Found ${courses.length} courses`);
     
     const studentsMap = new Map();
     courses.forEach((course) => {
-      (course.enrolledStudents || []).forEach((s) => {
-        studentsMap.set(s._id.toString(), s);
-      });
+      if (course && course.enrolledStudents && Array.isArray(course.enrolledStudents)) {
+        course.enrolledStudents.forEach((s) => {
+          if (s && s._id) {
+            studentsMap.set(s._id.toString(), s);
+          }
+        });
+      }
     });
-    return res.status(200).json(Array.from(studentsMap.values()));
+    
+    const students = Array.from(studentsMap.values());
+    console.log(`[GetMyStudents] Returning ${students.length} unique students`);
+    return res.status(200).json(students || []);
   } catch (error) {
-    return res.status(500).json({ message: "Error fetching students", error });
+    console.error("[GetMyStudents] Error:", error);
+    return res.status(500).json({ 
+      message: "Error fetching students", 
+      error: error.message || error 
+    });
   }
 };
 
@@ -132,21 +154,44 @@ export const getMyStudents = async (req, res) => {
 export const getStudentPerformance = async (req, res) => {
   try {
     const { studentId } = req.params;
-    const educator = await User.findById(req.userId);
+    console.log(`[GetStudentPerformance] Fetching performance for student: ${studentId}, by educator: ${req.userId}`);
     
-    if (!educator || (educator.role !== "educator" && educator.role !== "admin")) {
+    const educator = await User.findById(req.userId);
+    if (!educator) {
+      console.log(`[GetStudentPerformance] Educator not found: ${req.userId}`);
+      return res.status(404).json({ message: "Educator not found" });
+    }
+    
+    if (educator.role !== "educator" && educator.role !== "admin") {
+      console.log(`[GetStudentPerformance] Access denied for role: ${educator.role}`);
       return res.status(403).json({ message: "Educator access required" });
     }
 
-    const student = await User.findById(studentId);
-    if (!student) return res.status(404).json({ message: "Student not found" });
+    const student = await User.findById(studentId).select("-password");
+    if (!student) {
+      console.log(`[GetStudentPerformance] Student not found: ${studentId}`);
+      return res.status(404).json({ message: "Student not found" });
+    }
+    
+    console.log(`[GetStudentPerformance] Student found: ${student.name}, Role: ${student.role}`);
 
     // Get all courses where educator is creator and student is enrolled
     const educatorCourses = await Course.find({ creator: req.userId });
+    console.log(`[GetStudentPerformance] Found ${educatorCourses.length} courses created by educator`);
+    
     const courseIds = educatorCourses.map(c => c._id);
     const enrolledCourseIds = educatorCourses
-      .filter(c => c.enrolledStudents && Array.isArray(c.enrolledStudents) && c.enrolledStudents.some(id => id.toString() === studentId))
+      .filter(c => {
+        if (!c.enrolledStudents || !Array.isArray(c.enrolledStudents)) return false;
+        return c.enrolledStudents.some(id => {
+          const idStr = id.toString ? id.toString() : String(id);
+          const studentIdStr = studentId.toString ? studentId.toString() : String(studentId);
+          return idStr === studentIdStr;
+        });
+      })
       .map(c => c._id);
+    
+    console.log(`[GetStudentPerformance] Student enrolled in ${enrolledCourseIds.length} of educator's courses`);
 
     // Get all grades for this student in educator's courses
     const grades = await Grade.find({

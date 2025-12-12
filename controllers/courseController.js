@@ -75,9 +75,30 @@ export const getCreatorCourses = async (req, res) => {
   try {
     const userId = req.userId;
     console.log(`[GetCreatorCourses] Fetching courses for creator: ${userId}`);
-    const courses = await Course.find({ creator: userId }).populate("lectures reviews");
+    
+    if (!userId) {
+      console.log(`[GetCreatorCourses] userId is missing`);
+      return res.status(400).json({ message: "User ID is required" });
+    }
+    
+    const courses = await Course.find({ creator: userId })
+      .populate("lectures", "lectureTitle videoUrl isPreviewFree")
+      .populate("reviews", "rating comment")
+      .populate("enrolledStudents", "name email photoUrl class subject")
+      .lean(); // Use lean() for better performance in production
+    
     console.log(`[GetCreatorCourses] Found ${courses.length} courses for creator`);
-    return res.status(200).json(courses || []);
+    
+    // Ensure all courses have required fields and convert to plain objects
+    const formattedCourses = (courses || []).map(course => ({
+      ...course,
+      lectures: course.lectures || [],
+      reviews: course.reviews || [],
+      enrolledStudents: course.enrolledStudents || [],
+      enrolledStudentsCount: course.enrolledStudents?.length || 0
+    }));
+    
+    return res.status(200).json(formattedCourses);
 
   } catch (error) {
     console.error("[GetCreatorCourses] Error:", error);
@@ -340,13 +361,27 @@ export const enrollCourse = async (req, res) => {
 export const getCreatorById = async (req, res) => {
   try {
     const { userId } = req.body;
+    console.log(`[GetCreatorById] Fetching creator: ${userId}`);
+
+    if (!userId) {
+      console.log(`[GetCreatorById] userId is required`);
+      return res.status(400).json({ message: "User ID is required" });
+    }
 
     const user = await User.findById(userId).select("-password");
-    if (!user) return res.status(404).json({ message: "Instructor Not Found" });
+    if (!user) {
+      console.log(`[GetCreatorById] User not found: ${userId}`);
+      return res.status(404).json({ message: "Instructor Not Found" });
+    }
 
+    console.log(`[GetCreatorById] Creator found: ${user.name}, Role: ${user.role}`);
     return res.status(200).json(user);
 
   } catch (error) {
-    return res.status(500).json({ message: "Creator Fetch Error" });
+    console.error("[GetCreatorById] Error:", error);
+    return res.status(500).json({ 
+      message: "Creator Fetch Error", 
+      error: error.message || error 
+    });
   }
 };
