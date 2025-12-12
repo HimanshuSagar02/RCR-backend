@@ -7,20 +7,31 @@ import Attendance from "../models/attendanceModel.js";
 /* ========================= Get Current User ========================= */
 export const getCurrentUser = async (req, res) => {
   try {
+    console.log(`[GetCurrentUser] Fetching user: ${req.userId}`);
     const user = await User.findById(req.userId)
       .select("-password");
 
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) {
+      console.log(`[GetCurrentUser] User not found: ${req.userId}`);
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    console.log(`[GetCurrentUser] User found: ${user.email}, Role: ${user.role}`);
 
     // For students, populate enrolled courses
     // For educators/admins, don't populate enrolled courses (they don't enroll)
     if (user.role === "student") {
       await user.populate("enrolledCourses");
+      console.log(`[GetCurrentUser] Populated ${user.enrolledCourses?.length || 0} enrolled courses`);
     }
 
     return res.status(200).json(user);
   } catch (error) {
-    return res.status(500).json({ message: "Get current user error", error });
+    console.error("[GetCurrentUser] Error:", error);
+    return res.status(500).json({ 
+      message: "Get current user error", 
+      error: error.message || error 
+    });
   }
 };
 
@@ -54,26 +65,38 @@ export const UpdateProfile = async (req, res) => {
 /* ========================= Get Enrolled Courses ========================= */
 export const getEnrolledCourses = async (req, res) => {
   try {
+    console.log(`[GetEnrolledCourses] Fetching for user: ${req.userId}`);
     const user = await User.findById(req.userId);
 
-    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user) {
+      console.log(`[GetEnrolledCourses] User not found: ${req.userId}`);
+      return res.status(404).json({ message: "User not found" });
+    }
 
     // For educators and admins, return courses they created (not enrolled)
     if (user.role === "educator" || user.role === "admin") {
+      console.log(`[GetEnrolledCourses] Fetching created courses for ${user.role}`);
       const createdCourses = await Course.find({ creator: req.userId })
         .populate("creator", "name email")
         .populate("enrolledStudents", "name email");
-      return res.status(200).json(createdCourses);
+      console.log(`[GetEnrolledCourses] Found ${createdCourses.length} created courses`);
+      return res.status(200).json(createdCourses || []);
     }
 
     // For students, return enrolled courses
+    console.log(`[GetEnrolledCourses] Fetching enrolled courses for student`);
     const populatedUser = await User.findById(req.userId)
       .populate("enrolledCourses");
     
+    console.log(`[GetEnrolledCourses] Found ${populatedUser.enrolledCourses?.length || 0} enrolled courses`);
     return res.status(200).json(populatedUser.enrolledCourses || []);
 
   } catch (err) {
-    return res.status(500).json({ message: "Error fetching enrolled courses", err });
+    console.error("[GetEnrolledCourses] Error:", err);
+    return res.status(500).json({ 
+      message: "Error fetching enrolled courses", 
+      error: err.message || err 
+    });
   }
 };
 

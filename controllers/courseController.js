@@ -38,11 +38,17 @@ export const createCourse = async (req, res) => {
 /* ============================= Get All Courses ============================= */
 export const getAllCourse = async (req, res) => {
   try {
+    console.log("[GetAllCourses] Fetching all courses...");
     const courses = await Course.find().populate("lectures reviews");
-    return res.status(200).json(courses);
+    console.log(`[GetAllCourses] Found ${courses.length} courses`);
+    return res.status(200).json(courses || []);
 
   } catch (error) {
-    return res.status(500).json({ message: "Fetching all course failed", error });
+    console.error("[GetAllCourses] Error:", error);
+    return res.status(500).json({ 
+      message: "Fetching all course failed", 
+      error: error.message || error 
+    });
   }
 };
 
@@ -50,11 +56,16 @@ export const getAllCourse = async (req, res) => {
 /* ===================== Get Only Published for Home UI ====================== */
 export const getPublishedCourses = async (req, res) => {
   try {
+    console.log("[GetPublishedCourses] Fetching published courses...");
     const courses = await Course.find({ isPublished: true }).populate("lectures reviews");
-    return res.status(200).json(courses);
+    console.log(`[GetPublishedCourses] Found ${courses.length} published courses`);
+    return res.status(200).json(courses || []);
 
   } catch (error) {
-    return res.status(500).json({ message: `Fetch Published Error: ${error}` });
+    console.error("[GetPublishedCourses] Error:", error);
+    return res.status(500).json({ 
+      message: `Fetch Published Error: ${error.message || error}` 
+    });
   }
 };
 
@@ -63,11 +74,16 @@ export const getPublishedCourses = async (req, res) => {
 export const getCreatorCourses = async (req, res) => {
   try {
     const userId = req.userId;
+    console.log(`[GetCreatorCourses] Fetching courses for creator: ${userId}`);
     const courses = await Course.find({ creator: userId }).populate("lectures reviews");
-    return res.status(200).json(courses);
+    console.log(`[GetCreatorCourses] Found ${courses.length} courses for creator`);
+    return res.status(200).json(courses || []);
 
   } catch (error) {
-    return res.status(500).json({ message: `Creator Course Fetch Failed: ${error}` });
+    console.error("[GetCreatorCourses] Error:", error);
+    return res.status(500).json({ 
+      message: `Creator Course Fetch Failed: ${error.message || error}` 
+    });
   }
 };
 
@@ -105,14 +121,22 @@ export const editCourse = async (req, res) => {
 export const getCourseById = async (req, res) => {
   try {
     const { courseId } = req.params;
+    console.log(`[GetCourseById] Fetching course: ${courseId}`);
 
     const course = await Course.findById(courseId).populate("lectures reviews");
-    if (!course) return res.status(404).json({ message: "Course Not Found" });
+    if (!course) {
+      console.log(`[GetCourseById] Course not found: ${courseId}`);
+      return res.status(404).json({ message: "Course Not Found" });
+    }
 
+    console.log(`[GetCourseById] Course found: ${course.title}, Lectures: ${course.lectures?.length || 0}`);
     return res.status(200).json(course);
 
   } catch (error) {
-    return res.status(500).json({ message: `Get Course Error: ${error}` });
+    console.error("[GetCourseById] Error:", error);
+    return res.status(500).json({ 
+      message: `Get Course Error: ${error.message || error}` 
+    });
   }
 };
 

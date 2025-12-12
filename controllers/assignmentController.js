@@ -56,10 +56,15 @@ export const createAssignment = async (req, res) => {
 export const getAssignmentsByCourse = async (req, res) => {
   try {
     const { courseId } = req.params;
+    console.log(`[GetAssignments] Fetching assignments for course: ${courseId}`);
     const assignments = await Assignment.find({ courseId }).sort({ createdAt: -1 });
-    return res.status(200).json(assignments);
+    console.log(`[GetAssignments] Found ${assignments.length} assignments`);
+    return res.status(200).json(assignments || []);
   } catch (error) {
-    return res.status(500).json({ message: `Fetch assignments failed: ${error}` });
+    console.error("[GetAssignments] Error:", error);
+    return res.status(500).json({ 
+      message: `Fetch assignments failed: ${error.message || error}` 
+    });
   }
 };
 

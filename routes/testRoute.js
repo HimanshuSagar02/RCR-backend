@@ -216,4 +216,95 @@ router.post("/user/:email/set-password", async (req, res) => {
     }
 });
 
+// Test data fetching endpoints
+router.get("/courses", async (req, res) => {
+    try {
+        const Course = (await import("../models/courseModel.js")).default;
+        const count = await Course.countDocuments();
+        const courses = await Course.find().limit(5).select("title category class subject").lean();
+        
+        return res.status(200).json({
+            success: true,
+            totalCourses: count,
+            sampleCourses: courses || [],
+            message: "Courses query successful"
+        });
+    } catch (error) {
+        console.error("[Test] Courses query error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Courses query failed",
+            error: error.message
+        });
+    }
+});
+
+router.get("/assignments", async (req, res) => {
+    try {
+        const Assignment = (await import("../models/assignmentModel.js")).default;
+        const count = await Assignment.countDocuments();
+        const assignments = await Assignment.find().limit(5).select("title courseId").lean();
+        
+        return res.status(200).json({
+            success: true,
+            totalAssignments: count,
+            sampleAssignments: assignments || [],
+            message: "Assignments query successful"
+        });
+    } catch (error) {
+        console.error("[Test] Assignments query error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Assignments query failed",
+            error: error.message
+        });
+    }
+});
+
+// Test authentication endpoint
+router.get("/auth-test", async (req, res) => {
+    try {
+        const jwt = (await import("jsonwebtoken")).default;
+        const { token } = req.cookies;
+        
+        if (!token) {
+            return res.status(401).json({
+                success: false,
+                message: "No token found in cookies",
+                hasToken: false
+            });
+        }
+        
+        if (!process.env.JWT_SECRET) {
+            return res.status(500).json({
+                success: false,
+                message: "JWT_SECRET not configured"
+            });
+        }
+        
+        try {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            return res.status(200).json({
+                success: true,
+                message: "Token is valid",
+                userId: decoded.userId,
+                hasToken: true
+            });
+        } catch (jwtError) {
+            return res.status(401).json({
+                success: false,
+                message: "Token is invalid or expired",
+                error: jwtError.name,
+                hasToken: true
+            });
+        }
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Auth test failed",
+            error: error.message
+        });
+    }
+});
+
 export default router;
