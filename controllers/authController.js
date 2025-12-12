@@ -192,11 +192,17 @@ export const login=async(req,res)=>{
             secure: isProduction, // Use secure cookies in production (HTTPS only)
             sameSite: isProduction ? "None" : "Lax", // None for cross-site in production, Lax for development
             maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+            path: "/", // Ensure cookie is available for all paths
         };
+        
+        // Only set domain for production if explicitly needed and known, otherwise let browser handle
+        if (isProduction && process.env.COOKIE_DOMAIN) {
+            cookieOptions.domain = process.env.COOKIE_DOMAIN;
+        }
         
         // Set cookie
         res.cookie("token", token, cookieOptions);
-        console.log(`[Login] Cookie set - secure: ${cookieOptions.secure}, sameSite: ${cookieOptions.sameSite}`);
+        console.log(`[Login] Cookie set - secure: ${cookieOptions.secure}, sameSite: ${cookieOptions.sameSite}, path: ${cookieOptions.path}`);
         
         // Return user without password
         const userResponse = user.toObject();

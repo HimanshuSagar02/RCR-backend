@@ -17,10 +17,26 @@ const isAuth = async (req, res, next) => {
       });
     }
     
+    // Try to get token from cookies first
     let { token } = req.cookies;
+    
+    // If no token in cookies, try Authorization header (for debugging)
+    if (!token && req.headers.authorization) {
+      const authHeader = req.headers.authorization;
+      if (authHeader.startsWith('Bearer ')) {
+        token = authHeader.substring(7);
+        console.log(`[isAuth] Token found in Authorization header`);
+      }
+    }
     
     if (!token) {
       console.log(`[isAuth] No token found in cookies for ${req.method} ${req.path}`);
+      console.log(`[isAuth] Cookies received:`, Object.keys(req.cookies || {}));
+      console.log(`[isAuth] Request headers:`, {
+        origin: req.headers.origin,
+        referer: req.headers.referer,
+        cookie: req.headers.cookie ? 'present' : 'missing'
+      });
       return res.status(401).json({ message: "Authentication required. Please login." });
     }
     

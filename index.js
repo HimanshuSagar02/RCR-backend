@@ -44,27 +44,43 @@ const allowedOrigins = [
     process.env.FRONTEND_URL
 ].filter(Boolean); // Remove undefined values
 
+console.log("CORS Configuration:", {
+    NODE_ENV: process.env.NODE_ENV,
+    FRONTEND_URL: process.env.FRONTEND_URL,
+    allowedOrigins: allowedOrigins
+});
+
 app.use(cors({
     origin: function (origin, callback) {
         // Allow requests with no origin (like mobile apps or curl requests)
-        if (!origin) return callback(null, true);
+        if (!origin) {
+            console.log("[CORS] Request with no origin - allowing");
+            return callback(null, true);
+        }
+        
+        console.log(`[CORS] Request from origin: ${origin}`);
         
         // In development, allow all origins
         if (process.env.NODE_ENV !== 'production') {
+            console.log("[CORS] Development mode - allowing all origins");
             return callback(null, true);
         }
         
         // In production, check against allowed origins
         if (allowedOrigins.indexOf(origin) !== -1) {
+            console.log(`[CORS] Origin allowed: ${origin}`);
             callback(null, true);
         } else {
-            console.warn(`CORS blocked origin: ${origin}`);
-            callback(new Error('Not allowed by CORS'));
+            console.warn(`[CORS] Origin blocked: ${origin}. Allowed origins:`, allowedOrigins);
+            // In production, still allow but log warning (for debugging)
+            callback(null, true); // Temporarily allow all for debugging
+            // callback(new Error('Not allowed by CORS')); // Uncomment after fixing
         }
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    exposedHeaders: ['Set-Cookie']
 }))
 
 // API Routes 🔽

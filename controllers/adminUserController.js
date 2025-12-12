@@ -63,6 +63,7 @@ export const createUserByAdmin = async (req, res) => {
 
 export const listUsers = async (req, res) => {
   try {
+    console.log(`[ListUsers] Fetching users for admin: ${req.userId}`);
     const { role, status } = req.query;
     const filter = {};
     
@@ -73,13 +74,16 @@ export const listUsers = async (req, res) => {
       filter.status = status;
     }
     
+    console.log(`[ListUsers] Filter:`, filter);
     const users = await User.find(filter)
       .select("-password -resetOtp -otpExpires -isOtpVerifed")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean(); // Use lean() for better performance
     
+    console.log(`[ListUsers] Found ${users.length} users`);
     return res.status(200).json(users || []);
   } catch (error) {
-    console.error("List users error:", error);
+    console.error("[ListUsers] Error:", error);
     return res.status(500).json({ 
       message: `List users failed: ${error.message || String(error)}` 
     });
