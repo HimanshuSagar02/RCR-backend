@@ -61,22 +61,55 @@ console.log("CORS Configuration:", {
 app.use(cors({
     origin: function (origin, callback) {
         // Allow requests with no origin (like mobile apps or curl requests)
-        if (!origin) return callback(null, true);
+        if (!origin) {
+            console.log('[CORS] No origin header - allowing request');
+            return callback(null, true);
+        }
+        
+        // Build allowed origins list
+        const allowedOrigins = [];
+        
+        // Add FRONTEND_URL if set
+        if (process.env.FRONTEND_URL) {
+            // Support comma-separated list of URLs
+            const urls = process.env.FRONTEND_URL.split(',').map(url => url.trim());
+            allowedOrigins.push(...urls);
+        }
+        
+        // Always allow localhost for development
+        allowedOrigins.push(
+            'http://localhost:5173',
+            'http://localhost:5174',
+            'http://localhost:5175',
+            'http://127.0.0.1:5173',
+            'http://127.0.0.1:5174',
+            'http://127.0.0.1:5175'
+        );
+        
+        // Always allow Netlify domain (production frontend)
+        allowedOrigins.push(
+            'https://rajchemreactor.netlify.app',
+            'https://www.rajchemreactor.netlify.app',
+            'http://rajchemreactor.netlify.app' // HTTP version if exists
+        );
         
         // In development, allow all origins
         if (process.env.NODE_ENV !== 'production') {
+            console.log(`[CORS] Development mode - allowing origin: ${origin}`);
             return callback(null, true);
         }
         
         // In production, check against whitelist
-        const allowedOrigins = process.env.FRONTEND_URL 
-            ? [process.env.FRONTEND_URL] 
-            : [];
+        console.log(`[CORS] Production mode - checking origin: ${origin}`);
+        console.log(`[CORS] Allowed origins:`, allowedOrigins);
         
         if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+            console.log(`[CORS] ✅ Origin allowed: ${origin}`);
             callback(null, true);
         } else {
-            callback(new Error('Not allowed by CORS'));
+            console.error(`[CORS] ❌ Origin blocked: ${origin}`);
+            console.error(`[CORS] Allowed origins:`, allowedOrigins);
+            callback(new Error(`Not allowed by CORS. Origin: ${origin}`));
         }
     },
     credentials: true,
@@ -89,12 +122,39 @@ app.use(cors({
 
 // Handle preflight requests explicitly (MUST be before routes)
 // Use regex pattern instead of wildcard for Express 5.x compatibility
-app.options(/.*/, cors({
-    origin: true,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Cookie']
-}));
+app.options(/.*/, (req, res) => {
+    const origin = req.headers.origin;
+    console.log(`[CORS] Preflight request from: ${origin}`);
+    
+    // Build allowed origins (same as main CORS config)
+    const allowedOrigins = [];
+    if (process.env.FRONTEND_URL) {
+        const urls = process.env.FRONTEND_URL.split(',').map(url => url.trim());
+        allowedOrigins.push(...urls);
+    }
+    allowedOrigins.push(
+        'http://localhost:5173',
+        'http://localhost:5174',
+        'http://localhost:5175',
+        'https://rajchemreactor.netlify.app',
+        'https://www.rajchemreactor.netlify.app',
+        'http://rajchemreactor.netlify.app'
+    );
+    
+    // Allow origin if in list or development mode
+    if (process.env.NODE_ENV !== 'production' || !origin || allowedOrigins.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin || '*');
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Cookie');
+        res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+        console.log(`[CORS] ✅ Preflight allowed for: ${origin}`);
+        return res.status(204).send();
+    } else {
+        console.error(`[CORS] ❌ Preflight blocked for: ${origin}`);
+        return res.status(403).json({ error: 'CORS preflight failed' });
+    }
+});
 
 // =====================================================
 // SECURITY MIDDLEWARES (Applied After CORS)
