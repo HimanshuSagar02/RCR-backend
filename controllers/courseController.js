@@ -39,15 +39,19 @@ export const createCourse = async (req, res) => {
 export const getAllCourse = async (req, res) => {
   try {
     console.log("[GetAllCourses] Fetching all courses...");
-    const courses = await Course.find().populate("lectures reviews");
+    const courses = await Course.find()
+      .populate("lectures")
+      .populate("creator", "name email photoUrl")
+      .lean();
     console.log(`[GetAllCourses] Found ${courses.length} courses`);
     return res.status(200).json(courses || []);
 
   } catch (error) {
     console.error("[GetAllCourses] Error:", error);
+    console.error("[GetAllCourses] Error stack:", error.stack);
     return res.status(500).json({ 
       message: "Fetching all course failed", 
-      error: error.message || error 
+      error: process.env.NODE_ENV === "development" ? error.message : "Internal server error"
     });
   }
 };

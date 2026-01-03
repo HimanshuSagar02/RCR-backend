@@ -12,9 +12,29 @@ const isAuth = async (req, res, next) => {
     // Check database connection
     if (mongoose.connection.readyState !== 1) {
       console.error(`[isAuth] Database not connected. State: ${mongoose.connection.readyState}`);
-      return res.status(503).json({ 
-        message: "Database connection unavailable. Please try again later." 
-      });
+      console.log("[isAuth] Attempting to reconnect...");
+      
+      // Try to reconnect if disconnected
+      if (mongoose.connection.readyState === 0) {
+        try {
+          const connectDb = (await import("../configs/db.js")).default;
+          await connectDb();
+          // Wait a moment for connection
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (err) {
+          console.error("[isAuth] Reconnection failed:", err.message);
+        }
+      }
+      
+      // If still not connected, return error
+      if (mongoose.connection.readyState !== 1) {
+        return res.status(503).json({ 
+          message: "Database connection unavailable. Please try again later.",
+          error: "Database not connected",
+          readyState: mongoose.connection.readyState,
+          hint: "Check MONGODB_URL environment variable and MongoDB Atlas network access"
+        });
+      }
     }
     
     // Try to get token from cookies first

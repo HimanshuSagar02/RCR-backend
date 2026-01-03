@@ -115,14 +115,17 @@ export const getMyStudents = async (req, res) => {
       return res.status(403).json({ message: "Educator or admin access required" });
     }
     
+    // Import Order model
+    const Order = (await import("../models/orderModel.js")).default;
+    
     // For admins, get all students. For educators, get only their students
     let courses;
     if (me.role === "admin") {
       console.log(`[GetMyStudents] Admin - fetching all courses`);
-      courses = await Course.find().populate("enrolledStudents", "name email photoUrl class subject totalActiveMinutes lastActiveAt");
+      courses = await Course.find().populate("enrolledStudents", "name email photoUrl class subject totalActiveMinutes lastActiveAt status");
     } else {
       console.log(`[GetMyStudents] Educator - fetching courses created by: ${req.userId}`);
-      courses = await Course.find({ creator: req.userId }).populate("enrolledStudents", "name email photoUrl class subject totalActiveMinutes lastActiveAt");
+      courses = await Course.find({ creator: req.userId }).populate("enrolledStudents", "name email photoUrl class subject totalActiveMinutes lastActiveAt status");
     }
     
     console.log(`[GetMyStudents] Found ${courses.length} courses`);
@@ -132,19 +135,137 @@ export const getMyStudents = async (req, res) => {
       if (course && course.enrolledStudents && Array.isArray(course.enrolledStudents)) {
         course.enrolledStudents.forEach((s) => {
           if (s && s._id) {
-            studentsMap.set(s._id.toString(), s);
+            studentsMap.set(s._id.toString(), {
+              ...s.toObject ? s.toObject() : s,
+              courseId: course._id,
+              courseTitle: course.title
+            });
           }
         });
       }
     });
     
+    // Get enrollment status from orders for each student
     const students = Array.from(studentsMap.values());
-    console.log(`[GetMyStudents] Returning ${students.length} unique students`);
-    return res.status(200).json(students || []);
+    const studentsWithStatus = await Promise.all(
+      students.map(async (student) => {
+        // Find orders for this student in courses created by this educator/admin
+        const courseIds = me.role === "admin" 
+          ? courses.map(c => c._id)
+          : courses.filter(c => c.creator.toString() === req.userId.toString()).map(c => c._id);
+        
+        const orders = await Order.find({
+          student: student._id,
+          course: { $in: courseIds }
+        }).sort({ createdAt: -1 }).lean();
+        
+        // Determine overall status
+        let enrollmentStatus = "pending";
+        let lastOrder = null;
+        
+        if (orders.length > 0) {
+          lastOrder = orders[0];
+          enrollmentStatus = lastOrder.status || (lastOrder.isPaid ? "success" : "pending");
+        } else {
+          // Check if student is enrolled (has enrollment but no order record)
+          const isEnrolled = courses.some(c => 
+            c.enrolledStudents?.some(s => s._id.toString() === student._id.toString())
+          );
+          enrollmentStatus = isEnrolled ? "success" : "pending";
+        }
+        
+        return {
+          ...student,
+          enrollmentStatus,
+          lastOrder: lastOrder ? {
+            orderId: lastOrder._id,
+            receiptId: lastOrder.receiptId,
+            amount: lastOrder.amount,
+            paidAt: lastOrder.paidAt,
+            status: lastOrder.status
+          } : null,
+          totalOrders: orders.length,
+          successfulOrders: orders.filter(o => o.status === "success" || o.isPaid).length,
+          failedOrders: orders.filter(o => o.status === "failed").length,
+          pendingOrders: orders.filter(o => o.status === "pending" && !o.isPaid).length
+        };
+      })
+    );
+    
+    console.log(`[GetMyStudents] Returning ${studentsWithStatus.length} unique students with status`);
+    return res.status(200).json(studentsWithStatus || []);
   } catch (error) {
     console.error("[GetMyStudents] Error:", error);
     return res.status(500).json({ 
       message: "Error fetching students", 
+      error: error.message || error 
+    });
+  }
+};
+
+/* ========================= Get All Students in App ========================= */
+export const getAllStudents = async (req, res) => {
+  try {
+    console.log(`[GetAllStudents] Fetching all students for user: ${req.userId}`);
+    const me = await User.findById(req.userId);
+    if (!me) {
+      console.log(`[GetAllStudents] User not found: ${req.userId}`);
+      return res.status(404).json({ message: "User not found" });
+    }
+    
+    if (me.role !== "educator" && me.role !== "admin") {
+      console.log(`[GetAllStudents] Access denied for role: ${me.role}`);
+      return res.status(403).json({ message: "Educator or admin access required" });
+    }
+    
+    // Get all users with role "student"
+    const allStudents = await User.find({ role: "student" })
+      .select("name email photoUrl class subject totalActiveMinutes lastActiveAt")
+      .sort({ name: 1 });
+    
+    console.log(`[GetAllStudents] Found ${allStudents.length} students in app`);
+    return res.status(200).json(allStudents || []);
+  } catch (error) {
+    console.error("[GetAllStudents] Error:", error);
+    return res.status(500).json({ 
+      message: "Error fetching all students", 
+      error: error.message || error 
+    });
+  }
+};
+
+/* ========================= Get Participant Details by Identity ========================= */
+export const getParticipantDetails = async (req, res) => {
+  try {
+    const { identity } = req.params;
+    
+    if (!identity) {
+      return res.status(400).json({ message: "Identity is required" });
+    }
+    
+    // Try to find user by email or ID
+    let user = await User.findOne({ 
+      $or: [
+        { email: identity },
+        { _id: identity }
+      ]
+    }).select("name email photoUrl role class subject");
+    
+    if (!user) {
+      // If not found, return basic info from identity
+      return res.status(200).json({
+        name: identity.split('@')[0] || identity,
+        email: identity.includes('@') ? identity : "",
+        role: "student",
+        photoUrl: ""
+      });
+    }
+    
+    return res.status(200).json(user);
+  } catch (error) {
+    console.error("[GetParticipantDetails] Error:", error);
+    return res.status(500).json({ 
+      message: "Error fetching participant details", 
       error: error.message || error 
     });
   }

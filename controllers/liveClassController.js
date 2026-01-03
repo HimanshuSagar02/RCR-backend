@@ -74,9 +74,15 @@ export const createLiveClass = async (req, res) => {
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ message: "User not found" });
 
+    // Only educators and admins can create live classes
     if (user.role !== "educator" && user.role !== "admin") {
-      return res.status(403).json({ message: "Only educators can create live classes" });
+      console.log(`[CreateLiveClass] Access denied - User role: ${user.role}, User ID: ${req.userId}`);
+      return res.status(403).json({ 
+        message: "Only educators and admins can create live classes. Please contact your administrator if you need access." 
+      });
     }
+    
+    console.log(`[CreateLiveClass] User authorized - Role: ${user.role}, Name: ${user.name}`);
 
     const course = await Course.findById(courseId);
     if (!course) return res.status(404).json({ message: "Course not found" });
@@ -101,9 +107,21 @@ export const createLiveClass = async (req, res) => {
       status: "scheduled",
     });
 
+    // Populate the created live class before returning
+    await liveClass.populate("courseId", "title thumbnail");
+    await liveClass.populate("educatorId", "name email photoUrl");
+    
+    console.log(`[CreateLiveClass] Live class created successfully - ID: ${liveClass._id}, Title: ${liveClass.title}`);
+    
     return res.status(201).json(liveClass);
   } catch (error) {
-    return res.status(500).json({ message: `Create live class failed: ${error.message}` });
+    console.error("[CreateLiveClass] Error:", error);
+    console.error("[CreateLiveClass] Error stack:", error.stack);
+    return res.status(500).json({ 
+      message: `Create live class failed: ${error.message || error}`,
+      error: process.env.NODE_ENV === 'development' ? error.message : "Internal server error",
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 };
 
@@ -154,14 +172,26 @@ export const getMyLiveClasses = async (req, res) => {
     })
       .populate("courseId", "title thumbnail")
       .populate("educatorId", "name email photoUrl")
+      .lean()
       .sort({ scheduledDate: 1 });
 
     console.log(`[GetMyLiveClasses] Found ${liveClasses.length} live classes`);
-    return res.status(200).json(liveClasses || []);
+    
+    // Ensure all live classes have proper structure
+    const formattedLiveClasses = (liveClasses || []).map(liveClass => ({
+      ...liveClass,
+      courseId: liveClass.courseId || { _id: liveClass.courseId, title: "Unknown Course" },
+      educatorId: liveClass.educatorId || { _id: liveClass.educatorId, name: "Unknown Educator" }
+    }));
+    
+    return res.status(200).json(formattedLiveClasses);
   } catch (error) {
     console.error("[GetMyLiveClasses] Error:", error);
+    console.error("[GetMyLiveClasses] Error stack:", error.stack);
     return res.status(500).json({ 
-      message: `Fetch my live classes failed: ${error.message || error}` 
+      message: `Fetch my live classes failed: ${error.message || error}`,
+      error: process.env.NODE_ENV === 'development' ? error.message : "Internal server error",
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
@@ -183,15 +213,27 @@ export const getEducatorLiveClasses = async (req, res) => {
 
     const liveClasses = await LiveClass.find({ educatorId: req.userId })
       .populate("courseId", "title thumbnail")
-      .populate("enrolledStudents.studentId", "name email")
+      .populate("enrolledStudents.studentId", "name email photoUrl")
+      .lean()
       .sort({ scheduledDate: -1 });
 
     console.log(`[GetEducatorLiveClasses] Found ${liveClasses.length} live classes`);
-    return res.status(200).json(liveClasses || []);
+    
+    // Ensure all live classes have proper structure
+    const formattedLiveClasses = (liveClasses || []).map(liveClass => ({
+      ...liveClass,
+      courseId: liveClass.courseId || { _id: liveClass.courseId, title: "Unknown Course" },
+      enrolledStudents: liveClass.enrolledStudents || []
+    }));
+    
+    return res.status(200).json(formattedLiveClasses);
   } catch (error) {
     console.error("[GetEducatorLiveClasses] Error:", error);
+    console.error("[GetEducatorLiveClasses] Error stack:", error.stack);
     return res.status(500).json({ 
-      message: `Fetch educator live classes failed: ${error.message || error}` 
+      message: `Fetch educator live classes failed: ${error.message || error}`,
+      error: process.env.NODE_ENV === 'development' ? error.message : "Internal server error",
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
@@ -306,6 +348,14 @@ export const updateLiveClassStatus = async (req, res) => {
         const roomId = liveClass._id.toString().replace(/[^a-zA-Z0-9_-]/g, '-');
         liveClass.liveKitRoomName = `liveclass-${roomId}`;
         console.log(`[LiveKit] Created room: ${liveClass.liveKitRoomName} for live class: ${liveClass._id}`);
+      }
+      
+      // If starting a class that was scheduled for future, update scheduledDate to now
+      // This allows "Start Now" feature to work even if class was scheduled for later
+      if (status === "live" && new Date(liveClass.scheduledDate) > new Date()) {
+        console.log(`[UpdateLiveClassStatus] Starting class early - was scheduled for ${liveClass.scheduledDate}, starting now`);
+        // Keep original scheduled date for reference, but class is now live
+        // Optionally, you could update scheduledDate to now if needed
       }
     }
 

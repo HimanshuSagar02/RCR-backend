@@ -13,6 +13,17 @@ export const signUp=async (req,res)=>{
     try {
 
         let {name,email,password,role,class:studentClass,subject}= req.body
+        
+        // Prevent educator/teacher signup - only students can sign up
+        if(role && role !== "student"){
+            return res.status(403).json({
+                message: "Only students can create accounts. Teachers/Educators are created by administrators. Please contact your administrator or use the login page if you already have an account."
+            })
+        }
+        
+        // Force student role
+        role = "student"
+        
         let existUser= await User.findOne({email})
         if(existUser){
             return res.status(400).json({message:"email already exist"})
@@ -20,12 +31,22 @@ export const signUp=async (req,res)=>{
         if(!validator.isEmail(email)){
             return res.status(400).json({message:"Please enter valid Email"})
         }
-        if(password.length < 6){
-            return res.status(400).json({message:"Password must be at least 6 characters"})
+        // Enhanced password validation
+        if(password.length < 8){
+            return res.status(400).json({message:"Password must be at least 8 characters long"})
+        }
+        if(!/(?=.*[a-z])/.test(password)){
+            return res.status(400).json({message:"Password must contain at least one lowercase letter"})
+        }
+        if(!/(?=.*[A-Z])/.test(password)){
+            return res.status(400).json({message:"Password must contain at least one uppercase letter"})
+        }
+        if(!/(?=.*\d)/.test(password)){
+            return res.status(400).json({message:"Password must contain at least one number"})
         }
         
-        // Validate class for students
-        if(role === "student" && !studentClass){
+        // Validate class for students (mandatory)
+        if(!studentClass){
             return res.status(400).json({message:"Class/Grade is mandatory for students. Please select 9th, 10th, 11th, 12th, or NEET Dropper"})
         }
         
@@ -34,9 +55,9 @@ export const signUp=async (req,res)=>{
             name ,
             email ,
             password:hashPassword ,
-            role,
-            class: role === "student" ? studentClass : "",
-            subject: role === "student" ? (subject || "") : "",
+            role: "student", // Always student
+            class: studentClass,
+            subject: subject || "",
             status:"pending",
             createdByAdmin:false
             })
@@ -217,12 +238,30 @@ export const login=async(req,res)=>{
         console.error("[Login] Error details:", {
             message: error.message,
             name: error.name,
-            email: req.body?.email
+            email: req.body?.email,
+            code: error.code,
+            errno: error.errno
         });
+        
+        // More specific error messages
+        let errorMessage = "Login failed. Please try again.";
+        if (error.message) {
+            if (error.message.includes("JWT_SECRET")) {
+                errorMessage = "Server configuration error. Please contact administrator.";
+            } else if (error.message.includes("database") || error.message.includes("connection")) {
+                errorMessage = "Database connection error. Please try again later.";
+            } else if (error.message.includes("token")) {
+                errorMessage = "Authentication error. Please try again.";
+            } else {
+                errorMessage = error.message;
+            }
+        }
+        
         return res.status(500).json({
-            message: `Login error: ${error.message || 'Internal server error'}`,
-            error: process.env.NODE_ENV === 'development' ? error.stack : undefined
-        })
+            message: errorMessage,
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 }
 
@@ -247,24 +286,32 @@ export const googleSignup = async (req,res) => {
             return res.status(400).json({message:"Email is required"})
         }
         
+        // Prevent educator/teacher signup - only students can sign up
+        if(role && role !== "student"){
+            return res.status(403).json({
+                message: "Only students can create accounts. Teachers/Educators are created by administrators. Please contact your administrator or use the login page if you already have an account."
+            })
+        }
+        
+        // Force student role
+        const userRole = "student"
+        
+        // Validate class for students (mandatory)
+        if(!studentClass){
+            return res.status(400).json({message:"Class/Grade is mandatory for students. Please select 9th, 10th, 11th, 12th, or NEET Dropper"})
+        }
+        
         let user = await User.findOne({email})
         
         if(!user){
-            // New user - create with role from signup or default to student
-            const userRole = role || "student"
-            
-            // Validate class for students
-            if(userRole === "student" && !studentClass){
-                return res.status(400).json({message:"Class/Grade is mandatory for students. Please select 9th, 10th, 11th, 12th, or NEET Dropper"})
-            }
-            
+            // New user - always create as student
             user = await User.create({
                 name: name || "User",
                 email,
-                role: userRole,
+                role: "student", // Always student
                 photoUrl: photoUrl || "",
-                class: userRole === "student" ? studentClass : "",
-                subject: userRole === "student" ? (subject || "") : "",
+                class: studentClass,
+                subject: subject || "",
                 status: "approved", // Auto-approve Google signups
                 createdByAdmin: false
             })
@@ -289,12 +336,25 @@ export const googleSignup = async (req,res) => {
         }
         
         let token = await genToken(user._id)
-        res.cookie("token",token,{
-            httpOnly:true,
-            secure:false,
-            sameSite: "Strict",
-            maxAge: 7 * 24 * 60 * 60 * 1000
-        })
+        
+        // Cookie settings - use secure in production
+        const isProduction = process.env.NODE_ENV === 'production';
+        const cookieOptions = {
+            httpOnly: true,
+            secure: isProduction, // Use secure cookies in production (HTTPS only)
+            sameSite: isProduction ? "None" : "Lax", // None for cross-site in production, Lax for development
+            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+            path: "/", // Ensure cookie is available for all paths
+        };
+        
+        // Only set domain for production if explicitly needed and known, otherwise let browser handle
+        if (isProduction && process.env.COOKIE_DOMAIN) {
+            cookieOptions.domain = process.env.COOKIE_DOMAIN;
+        }
+        
+        // Set cookie
+        res.cookie("token", token, cookieOptions);
+        console.log(`[GoogleSignup] Cookie set - secure: ${cookieOptions.secure}, sameSite: ${cookieOptions.sameSite}, path: ${cookieOptions.path}`);
         
         // Return user without password
         const userResponse = user.toObject()
@@ -310,60 +370,156 @@ export const googleSignup = async (req,res) => {
 export const sendOtp = async (req,res) => {
     try {
         const {email} = req.body
+        
         if(!email){
             return res.status(400).json({message:"Email is required"})
         }
-        const user = await User.findOne({email})
-        if(!user){
-            return res.status(404).json({message:"User not found"})
+        
+        // Normalize email
+        const normalizedEmail = email.toLowerCase().trim();
+        console.log(`[SendOTP] Request for email: ${normalizedEmail}`);
+        
+        // Try to find user with case-insensitive search
+        let user = await User.findOne({email: normalizedEmail});
+        
+        // If not found, try case-insensitive regex
+        if (!user) {
+            user = await User.findOne({email: { $regex: new RegExp(`^${normalizedEmail}$`, 'i') }});
         }
+        
+        if(!user){
+            console.log(`[SendOTP] User not found: ${normalizedEmail}`);
+            return res.status(404).json({message:"User not found with this email address"})
+        }
+        
+        console.log(`[SendOTP] User found: ${user.email}, Generating OTP...`);
         const otp = Math.floor(1000 + Math.random() * 9000).toString()
 
-        user.resetOtp=otp,
-        user.otpExpires=Date.now() + 5*60*1000,
-        user.isOtpVerifed= false 
+        user.resetOtp = otp;
+        user.otpExpires = Date.now() + 5*60*1000; // 5 minutes
+        user.isOtpVerifed = false;
 
         await user.save()
+        console.log(`[SendOTP] OTP saved for user: ${user.email}, OTP: ${otp}`);
+        
+        // Check email configuration BEFORE attempting to send
+        if (!process.env.EMAIL || !process.env.EMAIL_PASS) {
+            console.error("[SendOTP] Email configuration missing - EMAIL or EMAIL_PASS not set");
+            console.error("[SendOTP] EMAIL:", process.env.EMAIL ? "Set" : "Missing");
+            console.error("[SendOTP] EMAIL_PASS:", process.env.EMAIL_PASS ? "Set" : "Missing");
+            
+            // In development mode, return OTP in response so user can test
+            const isDevelopment = !process.env.NODE_ENV || process.env.NODE_ENV === 'development';
+            
+            if (isDevelopment) {
+                console.log(`\n🔑 [SendOTP] DEVELOPMENT MODE - OTP for ${normalizedEmail}: ${otp}`);
+                console.log(`[SendOTP] In production, configure EMAIL and EMAIL_PASS to send emails\n`);
+                
+                return res.status(200).json({
+                    message: `OTP generated successfully. In development mode, OTP is: ${otp}`,
+                    otp: otp,
+                    hint: "Configure EMAIL and EMAIL_PASS in .env to send emails in production"
+                });
+            }
+            
+            return res.status(500).json({
+                message: "Email service is not configured. Please contact administrator.",
+                hint: "EMAIL and EMAIL_PASS environment variables are required"
+            });
+        }
+        
         try {
-            await sendMail(email,otp)
-            return res.status(200).json({message:"OTP sent successfully to your email"})
+            console.log(`[SendOTP] Attempting to send email to: ${normalizedEmail}`);
+            await sendMail(normalizedEmail, otp)
+            console.log(`[SendOTP] Email sent successfully to: ${normalizedEmail}`);
+            return res.status(200).json({
+                message: "OTP sent successfully to your email. Please check your inbox (and spam folder)."
+            })
         } catch (mailError) {
-            console.error("Email send error:", mailError);
-            return res.status(500).json({message:"Failed to send email. Please check your email configuration or try again later."})
+            console.error("[SendOTP] Email send error:", mailError);
+            console.error("[SendOTP] Error details:", {
+                message: mailError.message,
+                code: mailError.code,
+                response: mailError.response
+            });
+            
+            // In development, return OTP so user can still test
+            const isDevelopment = !process.env.NODE_ENV || process.env.NODE_ENV === 'development';
+            
+            if (isDevelopment) {
+                console.log(`\n🔑 [SendOTP] DEVELOPMENT MODE - Email failed but OTP for ${normalizedEmail}: ${otp}`);
+                console.log(`[SendOTP] Check console logs for OTP\n`);
+                
+                return res.status(200).json({
+                    message: `Email sending failed, but OTP generated. In development mode, OTP is: ${otp}`,
+                    otp: otp,
+                    error: mailError.message,
+                    hint: "Configure EMAIL and EMAIL_PASS correctly to send emails"
+                });
+            }
+            
+            return res.status(500).json({
+                message: "Failed to send email. Please check your email configuration or try again later.",
+                error: process.env.NODE_ENV === 'development' ? mailError.message : undefined
+            });
         }
     } catch (error) {
-        console.error("Send OTP error:", error);
+        console.error("[SendOTP] Error:", error);
         return res.status(500).json({message:`Send OTP error: ${error.message}`})
     }
 }
 
 export const verifyOtp = async (req,res) => {
     try {
-        const {email,otp} = req.body
+        const {email, otp} = req.body
+        
         if(!email || !otp){
             return res.status(400).json({message:"Email and OTP are required"})
         }
-        const user = await User.findOne({email})
-        if(!user){
-            return res.status(404).json({message:"User not found"})
+        
+        // Normalize email
+        const normalizedEmail = email.toLowerCase().trim();
+        console.log(`[VerifyOTP] Verifying OTP for email: ${normalizedEmail}`);
+        
+        // Try to find user with case-insensitive search
+        let user = await User.findOne({email: normalizedEmail});
+        
+        // If not found, try case-insensitive regex
+        if (!user) {
+            user = await User.findOne({email: { $regex: new RegExp(`^${normalizedEmail}$`, 'i') }});
         }
+        
+        if(!user){
+            console.log(`[VerifyOTP] User not found: ${normalizedEmail}`);
+            return res.status(404).json({message:"User not found with this email address"})
+        }
+        
+        console.log(`[VerifyOTP] User found: ${user.email}, Checking OTP...`);
+        
         if(!user.resetOtp){
+            console.log(`[VerifyOTP] No OTP found for user: ${user.email}`);
             return res.status(400).json({message:"No OTP found. Please request a new OTP."})
         }
+        
         if(user.resetOtp !== otp){
+            console.log(`[VerifyOTP] Invalid OTP for user: ${user.email}. Expected: ${user.resetOtp}, Received: ${otp}`);
             return res.status(400).json({message:"Invalid OTP. Please check and try again."})
         }
+        
         if(user.otpExpires < Date.now()){
+            console.log(`[VerifyOTP] OTP expired for user: ${user.email}. Expires: ${new Date(user.otpExpires)}, Now: ${new Date()}`);
             return res.status(400).json({message:"OTP has expired. Please request a new OTP."})
         }
-        user.isOtpVerifed=true
+        
+        user.isOtpVerifed = true;
         // Keep OTP until password is reset
-        await user.save()
+        await user.save();
+        console.log(`[VerifyOTP] OTP verified successfully for: ${user.email}`);
+        
         return res.status(200).json({message:"OTP verified successfully. You can now reset your password."})
 
-
     } catch (error) {
-        console.error("Verify OTP error:", error);
+        console.error("[VerifyOTP] Error:", error);
         return res.status(500).json({message:`Verify OTP error: ${error.message}`})
     }
 }

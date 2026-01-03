@@ -17,18 +17,44 @@ router.get("/db", async (req, res) => {
             3: "disconnecting"
         };
         
-        return res.status(200).json({
+        const response = {
             success: dbState === 1,
             status: states[dbState] || "unknown",
+            readyState: dbState,
             message: dbState === 1 ? "Database is connected" : "Database is not connected",
-            database: mongoose.connection.name,
-            host: mongoose.connection.host
-        });
+            environment: process.env.NODE_ENV || "development",
+            hasMongoUrl: !!process.env.MONGODB_URL,
+            mongoUrlPreview: process.env.MONGODB_URL 
+                ? process.env.MONGODB_URL.substring(0, 30) + "..." 
+                : "Not set"
+        };
+        
+        if (dbState === 1) {
+            response.database = mongoose.connection.name;
+            response.host = mongoose.connection.host;
+            response.port = mongoose.connection.port;
+        } else {
+            response.hint = "Check MONGODB_URL environment variable and MongoDB Atlas network access";
+            
+            // Try to reconnect if disconnected
+            if (dbState === 0) {
+                try {
+                    const connectDb = (await import("../configs/db.js")).default;
+                    await connectDb();
+                    response.reconnectionAttempted = true;
+                } catch (err) {
+                    response.reconnectionError = err.message;
+                }
+            }
+        }
+        
+        return res.status(200).json(response);
     } catch (error) {
         return res.status(500).json({
             success: false,
             message: "Database check failed",
-            error: error.message
+            error: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
     }
 });

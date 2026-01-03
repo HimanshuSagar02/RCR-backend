@@ -7,8 +7,10 @@ import {
   UpdateProfile,
   getEnrolledCourses,
   getMyStudents,
+  getAllStudents,
   getStudentPerformance,
-  updateActivity
+  updateActivity,
+  getParticipantDetails
 } from "../controllers/userController.js";
 
 
@@ -29,8 +31,13 @@ userRouter.get("/student/:studentId/performance", isAuth, getStudentPerformance)
 // Educator: list students across own courses
 userRouter.get("/mystudents", isAuth, getMyStudents);
 
+// Educator/Admin: get all students in the app
+userRouter.get("/allstudents", isAuth, getAllStudents);
+
 // Activity tracking
 userRouter.post("/activity", isAuth, updateActivity);
 
+// Get participant details by identity (for live classes)
+userRouter.get("/participant/:identity", isAuth, getParticipantDetails);
 
 export default userRouter;
