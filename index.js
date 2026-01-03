@@ -103,13 +103,28 @@ app.use(cors({
         console.log(`[CORS] Production mode - checking origin: ${origin}`);
         console.log(`[CORS] Allowed origins:`, allowedOrigins);
         
-        if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+        // Check if origin matches any allowed origin (exact match or subdomain)
+        const isAllowed = allowedOrigins.some(allowed => {
+            // Exact match
+            if (allowed === origin) return true;
+            // Subdomain match (e.g., www.rajchemreactor.netlify.app matches rajchemreactor.netlify.app)
+            if (origin && origin.endsWith(allowed.replace(/^https?:\/\//, ''))) return true;
+            return false;
+        });
+        
+        if (allowedOrigins.length === 0 || isAllowed) {
             console.log(`[CORS] ✅ Origin allowed: ${origin}`);
             callback(null, true);
         } else {
             console.error(`[CORS] ❌ Origin blocked: ${origin}`);
             console.error(`[CORS] Allowed origins:`, allowedOrigins);
-            callback(new Error(`Not allowed by CORS. Origin: ${origin}`));
+            // TEMPORARY: Allow anyway if FRONTEND_URL not set (for deployment testing)
+            if (!process.env.FRONTEND_URL) {
+                console.warn(`[CORS] ⚠️ FRONTEND_URL not set - allowing origin anyway (temporary)`);
+                callback(null, true);
+            } else {
+                callback(new Error(`Not allowed by CORS. Origin: ${origin}`));
+            }
         }
     },
     credentials: true,
